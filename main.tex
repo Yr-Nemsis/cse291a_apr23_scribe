@@ -1,0 +1,103 @@
+\documentclass[twoside]{article}
+
+\usepackage{epsfig}
+\usepackage{amsmath}
+\usepackage{booktabs}
+
+\setlength{\oddsidemargin}{0.25 in}
+\setlength{\evensidemargin}{-0.25 in}
+\setlength{\topmargin}{-0.6 in}
+\setlength{\textwidth}{6.5 in}
+\setlength{\textheight}{8.5 in}
+\setlength{\headsep}{0.75 in}
+\setlength{\parindent}{0 in}
+\setlength{\parskip}{0.1 in}
+
+\newcommand{\lecture}[3]{
+   \pagestyle{myheadings}
+   \thispagestyle{plain}
+   \newpage
+   \setcounter{page}{1}
+   \noindent
+   \begin{center}
+   \framebox{
+      \vbox{\vspace{2mm}
+    \hbox to 6.28in { {\bf CSE 291A/DSC 291:~Data Systems for Machine Learning, Spring 2026 \hfill} }
+       \vspace{6mm}
+       \hbox to 6.28in { {\Large \hfill #1  \hfill} }
+       \vspace{6mm}
+       \hbox to 6.28in { {\it Lecturer: #2 \hfill Scribe: #3} }
+      \vspace{2mm}}
+   }
+   \end{center}
+   \markboth{#1}{#1}
+   \vspace*{4mm}
+}
+
+\begin{document}
+
+\lecture{8: Runtime: Batching and Memory}{Hao Zhang}{Buwei Wu}
+
+\section{Big Picture: Where We Are}
+
+In the previous lectures, we discussed several layers of deep learning systems. We first introduced the dataflow graph abstraction, where a machine learning program is represented as a graph of operators and tensors. We then discussed automatic differentiation, which allows the system to construct the backward pass from the forward computation. We also covered graph optimization, which is similar in spirit to traditional compiler optimization, except that the program being optimized is now a dataflow graph. In addition, we discussed operator optimization and compilation, where individual kernels such as matrix multiplication, convolution, and other tensor operators are implemented efficiently.
+
+This lecture begins the discussion of \emph{runtime}. Once the graph has been built, differentiated, optimized, and lowered into executable operators, the system still has to run the graph efficiently. Runtime is where many practical systems problems appear. For example, even if every operator is individually optimized, the overall training job can still fail because the model, activations, or optimizer states do not fit in GPU memory. Similarly, a system may have enough total computation available, but poor scheduling or data movement can make the training loop slow.
+
+At a high level, the topics in this runtime part include:
+\begin{itemize}
+    \item batching;
+    \item checkpointing and rematerialization;
+    \item swapping;
+    \item quantization, mixed precision, and pruning.
+\end{itemize}
+
+These techniques are especially important for modern deep learning workloads because the models are often too large to fit comfortably on a single device. In this lecture, we start with the single-device or single-node setting. This is a simplified setting, but the ideas are still important because they are complementary to parallelization. Even when a model is distributed across many GPUs, each GPU still has limited memory, so runtime memory-saving techniques remain useful.
+
+\section{Running the Graph with Minibatches}
+
+After the graph is constructed and optimized, training repeatedly executes the graph over many batches of data. A typical training loop can be written as
+\[
+    \text{for } t = 1 \rightarrow N,
+\]
+where each iteration uses a batch of training data $D^{(t)}$ and updates the model parameters. Abstractly, the update can be written as
+\[
+    \theta^{(t+1)}
+    =
+    f\left(\theta^{(t)}, \nabla_{\theta} L\left(\theta^{(t)}, D^{(t)}\right)\right).
+\]
+Here, $\theta^{(t)}$ denotes the model parameters at iteration $t$, $D^{(t)}$ denotes the data batch used in that iteration, and $\nabla_{\theta} L$ denotes the gradient of the loss with respect to the parameters. The function $f$ represents the optimizer update rule. For example, for simple stochastic gradient descent, $f$ subtracts a learning-rate-scaled gradient from the current parameters. For more complex optimizers, such as Adam, $f$ also depends on additional optimizer states.
+
+The important systems point is that each iteration is not just a mathematical update. It requires executing the forward pass, storing or recomputing intermediate values, executing the backward pass, and updating parameters. Therefore, runtime performance depends not only on floating point throughput, but also on memory capacity, memory lifetime, scheduling, and data movement.
+
+\section{Why the Term ``Batch'' Is Ambiguous}
+
+The word \emph{batch} is used in several different ways across machine learning, optimization, and data systems. Before discussing batching as a runtime technique, it is useful to separate these meanings.
+
+In deep learning training, a batch usually refers to a group of training examples processed together. Instead of computing the gradient using the entire dataset, we sample a subset of examples and use this subset to estimate the gradient. This is the standard setting for stochastic gradient descent and its variants. In many practical contexts, people also use the terms \emph{batch} and \emph{mini-batch} interchangeably.
+
+From the perspective of classical optimization, there is a distinction between full-batch gradient descent and stochastic gradient descent. In full-batch gradient descent, the entire dataset is used to compute one gradient update. This is usually impractical for deep learning because the full dataset is too large to fit in memory and too expensive to process at every step. In stochastic gradient descent, we instead use a smaller sampled batch. Under uniform sampling, the gradient computed from this smaller batch can be viewed as an unbiased estimate of the full-batch gradient. This is one reason stochastic gradient descent is widely used in machine learning.
+
+In big data systems, the word batch has a different meaning. Batch processing usually means offline processing over a dataset that is already available. This is often contrasted with streaming or online processing, where data arrives over time and the system processes events as they arrive. Therefore, ``batch'' in big data systems refers more to the processing mode, while ``batch'' in deep learning usually refers to a group of training samples used in one or more training computations.
+
+\section{Different Batch-Related Terms}
+
+The following table summarizes the main meanings of several related terms.
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+\textbf{Term} & \textbf{Context} & \textbf{Meaning} \\
+\midrule
+Batch & Deep learning & A group of training samples processed together \\
+Mini-batch & Deep learning & A smaller subset of the dataset used for a training iteration \\
+Micro-batch & Deep learning & A split of a mini-batch, often used for pipeline parallelism \\
+Batch processing & Big data & Processing a large dataset in bulk/offline \\
+Micro-batching & Big data & Processing small groups of events in short time windows \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The distinction between mini-batches and micro-batches becomes important later in the lecture. A mini-batch is the effective batch of data used for one parameter update, while a micro-batch is a smaller piece of that mini-batch. Micro-batches are useful when the full mini-batch does not fit in memory or when the system wants to improve hardware utilization. For example, in gradient accumulation, the system can process several micro-batches one by one, accumulate their gradients, and then apply one optimizer update. In pipeline parallelism, micro-batches help keep different pipeline stages busy at the same time.
+
+\end{document}
