@@ -1,0 +1,17 @@
+% Scribe section by Anyin Huang
+% Slides covered: pages 22--26
+
+\section{Memory Overview}
+Taking GPT-3 (175B parameters) as an example, the memory cost of model parameters is about 350 GB (FP16) or 700 GB (FP32). 
+The activations, estimated only at transformer layer boundaries for 96 layers, consume about 7488 GB (FP16) or 14976 GB (FP32), though actual internal activations would be higher. 
+The optimizer states consume about 12 * 175 GB (FP32) of memory.
+
+\section{Reduce Activation Memory}
+In standard training, we store all intermediate activations to compute gradients during the backward pass, leading to an O(N) memory cost for an N-layer network. 
+Activation Checkpointing aims to reduce this peak memory by exploiting the fact that activations are not needed until the backward pass. 
+Option one is dicard nothing. 
+Option two is dicard all and recompute for each layer.
+We want to strike a balance. 
+The idea is that the activation is not needed again until the backward pass comes, discard some of them and recompute the missing intermediate nodes in small segments. 
+For an N-layer neural network, if we place a checkpoint every K layers, the total activation memory cost can be modeled as: Memory Cost = O(N/K) (Checkpoint cost) + O(K) (Re-computation cost). 
+By minimizing the cost function, we find the optimal solution at K= $\sqrt{N}$.
