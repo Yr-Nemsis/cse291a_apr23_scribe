@@ -1,0 +1,13 @@
+
+\section{Estimate size: Popular floating point standards}
+For example, when we use FP32, we need 4 bytes to store per floating points and if we use FP16, we need 2 bytes instead.\\
+FP16: Designed for general numerical computing. \\
+BF16: It essentially "chops off" the fraction bits of a standard 32-bit float (FP32) while keeping the same exponent size.
+\section{Estimate the weight size: GPT3}
+What precision we use decides how many bits we need to store each parameters, and we almost always use FP16, so we usually get N*2. Batch size mwans how many tokens per batch.
+\section{Estimate the activation size}
+The parameter size is the number of elements we use multiply by 2 or 4(depends on the precision). bs means batch size, nc means number of channels. Activation size is bs*nc*wo*ho*(size of(element)).
+\section{Estimate the activation size: MLP}
+C=X*W , which is output=input*weight. The activation size is bs*m*p*sizeof(element), we only look at the output which is linear with bs since we need to store the activation per input example.
+\section{Estimate the activation size:Transformers}
+h means the embedding size for each word, and seq\_len indicates the number of tokens used per sequence. Here we can see that the input and ouput size are the same for transformer model.
