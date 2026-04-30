@@ -1,0 +1,68 @@
+% Scribe section by Yuheng Li
+% Slides covered: pages 37 -- 39
+
+\subsection{Properties of Gradient Checkpointing}
+
+\textbf{Q: Which of the following statements is \emph{false} about gradient checkpointing?}
+\begin{itemize}
+    \item[A.] Applying gradient checkpointing during model training could save GPU memory.
+    \item[B.] Gradient checkpointing applies to both model weights and activations.
+    \item[C.] The location of gradient checkpointing affects how much re-computation and memory are needed.
+    \item[D.] It is possible to discard some of the activations from memory since they are only needed during the backward pass.
+\end{itemize}
+
+The answer is \textbf{B}. Gradient checkpointing is fundamentally a technique for activation memory only. It works by discarding intermediate activations after the forward pass and recomputing them on demand during the backward pass. Model weights, by contrast, must remain both the forward and the backward computation, as there is no possible way to recompute them during the backward pass, so the same trick cannot be applied to them.
+
+\subsection{Activation Size of GPT-3 2.7B}
+
+\textbf{Q: Given the table of GPT-3 model configurations, what is the activation size of GPT-3 2.7B (using fp16 for all activations and checkpointing at the transformer layer boundary)?}
+\begin{itemize}
+    \item[A.] $7031.25$ GB
+    \item[B.] $201.34$ GB
+    \item[C.] $152.59$ GB
+    \item[D.] $305.18$ GB
+\end{itemize}
+
+The answer is \textbf{C}. The relevant entries from the configuration table for GPT-3 2.7B are:
+\begin{center}
+\begin{tabular}{lr}
+\toprule
+$n_{\text{layers}}$ & $32$ \\
+$d_{\text{model}}$ & $2560$ \\
+Batch size (tokens per step) & $1\text{M} = 10^6$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+When we checkpoint at the transformer layer boundary, the only activation we keep on device per layer is the input to that layer, whose shape is $(B \cdot S) \times d_{\text{model}}$, where $B \cdot S$ is the total number of tokens in the batch. The size of one such checkpoint, in bytes, is
+\[
+\underbrace{(B \cdot S)}_{10^6} \;\times\; \underbrace{d_{\text{model}}}_{2560} \;\times\; \underbrace{2}_{\text{fp16}} \;=\; 5.12 \times 10^9 \text{ bytes}.
+\]
+We keep one such checkpoint per layer, and there are $n_{\text{layers}} = 32$ layers, so the total activation memory is
+\[
+32 \;\times\; 5.12 \times 10^9 \;=\; 1.6384 \times 10^{11} \text{ bytes}.
+\]
+Converting to gibibytes ($1\text{ GiB} = 2^{30}$ bytes),
+\[
+\frac{1.6384 \times 10^{11}}{2^{30}} \;\approx\; 152.59 \text{ GiB}.
+\]
+
+\section{How to Choose/Tune Memory Optimization}
+
+We now have three memory-saving techniques for a single device: gradient accumulation, gradient checkpointing, and CPU swapping. In practice, these methods are often used together, and usually in that order, from the least expensive to the most expensive in terms of training speed. The goal is to fit the workload on one device while still keeping the job completion time (JCT) acceptable.
+
+\begin{enumerate}
+    \item \textbf{Choose the target global batch size} (for example, $64$). This is usually set by the training setup and should stay fixed. The methods below do not change the effective batch size; they only change how that batch is run.
+
+    \item \textbf{Try training with that batch size directly.} If the job runs without an OOM, then no memory optimization is needed.
+
+    \item \textbf{If OOM happens, first use gradient accumulation.} Reduce the micro-batch size step by step ($32 \to 16 \to 8 \to \ldots$) while keeping the global batch size fixed. This is usually the cheapest option, since it does not add much extra computation. It only splits the same batch into more smaller steps before each parameter update.
+
+    \item \textbf{If gradient accumulation is still not enough, add gradient checkpointing.} Use the largest micro-batch size that fits in HBM, and recompute some activations during backpropagation instead of storing them all. This saves more memory, but it slows training down more than gradient accumulation.
+
+    \item \textbf{If the model still does not fit, turn on CPU swapping.} This is usually the most expensive option, because data must move between GPU memory and CPU memory, and CPU memory bandwidth is much lower than HBM bandwidth.
+
+    \item \textbf{Check whether the JCT is still acceptable.} All of these methods make training slower to some degree. If the final JCT is still within budget, then the setup is good. If not, the single device setup is no longer enough, and the next step is to use multiple devices, i.e., parallelism.
+\end{enumerate}
+
+The main idea is simple: always try the option with the smallest slowdown first, and only move to a heavier method if needed. Also note that these methods do not change tensor shapes. They mainly change when a tensor needs to stay on the GPU, not how large the tensor is. Reducing tensor size itself, for example, by using lower precision such as FP8, or FP4, is a separate topic(Quantization).
