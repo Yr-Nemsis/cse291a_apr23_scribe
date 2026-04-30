@@ -1,13 +1,47 @@
 
 \section{Estimate size: Popular floating point standards}
-For example, when we use FP32, we need 4 bytes to store per floating points and if we use FP16, we need 2 bytes instead.\\
-FP16: Designed for general numerical computing. \\
-BF16: It essentially "chops off" the fraction bits of a standard 32-bit float (FP32) while keeping the same exponent size.
+The precision format determines how many bytes are needed to store each value.
+In deep learning, this directly affects model memory, activation memory, and bandwidth.
+\begin{itemize}
+    \item FP32: 32 bits $= 4$ bytes per value.
+    \item FP16: 16 bits $= 2$ bytes per value. It has fewer exponent bits than FP32, so the dynamic range is smaller.
+    \item BF16: 16 bits $= 2$ bytes per value. It keeps the same exponent width as FP32 but uses fewer fraction bits, so it has lower precision but similar dynamic range.
+\end{itemize}
+In practice, FP16 and BF16 are common because they reduce memory by about $2\times$ compared with FP32.
 \section{Estimate the weight size: GPT3}
-What precision we use decides how many bits we need to store each parameters, and we almost always use FP16, so we usually get N*2. Batch size mwans how many tokens per batch.
+Weight size depends on the total number of parameters and the number of bytes per parameter:
+\[
+\text{Weight memory} = N_{\text{params}} \times \text{bytes per parameter}.
+\]
+If GPT-3 has $N$ parameters and we store weights in FP16/BF16, then:
+\[
+\text{Weight memory} \approx N \times 2 \text{ bytes}.
+\]
+For FP32, it would be $N \times 4$ bytes.
+Note that batch size does not change the weight size; batch size mainly affects activation memory.
 \section{Estimate the activation size}
-The parameter size is the number of elements we use multiply by 2 or 4(depends on the precision). bs means batch size, nc means number of channels. Activation size is bs*nc*wo*ho*(size of(element)).
+The parameter (or tensor) size is computed as the number of elements multiplied by the storage size of each element, which is usually 2 bytes (FP16) or 4 bytes (FP32), depending on the precision. Here, $bs$ means batch size, $nc$ means number of channels, and $w_o, h_o$ are the output width and height. Therefore, the activation size is
+\[
+bs \times nc \times w_o \times h_o \times \text{sizeof(element)}.
+\]
 \section{Estimate the activation size: MLP}
-C=X*W , which is output=input*weight. The activation size is bs*m*p*sizeof(element), we only look at the output which is linear with bs since we need to store the activation per input example.
+For an MLP layer, the output is computed as:
+\[
+C = XW,
+\]
+The output activation has $(bs \cdot m)\times p$ elements, so:
+\[
+\text{Activation memory} = bs \times m \times p \times \text{bytes per element}.
+\]
+The activation memory scales linearly with batch size because each input example contributes its own output activations.
 \section{Estimate the activation size:Transformers}
-h means the embedding size for each word, and seq\_len indicates the number of tokens used per sequence. Here we can see that the input and ouput size are the same for transformer model.
+In transformers, let $h$ be hidden size (embedding dimension) and $\text{seq\_len}$ be the number of tokens per sequence.
+For one layer, the input and output hidden states both have shape:
+\[
+(bs, \text{seq\_len}, h).
+\]
+So the base hidden-state activation memory is:
+\[
+bs \times \text{seq\_len} \times h \times \text{sizeof(element)}.
+\]
+During training, additional activations are stored for backpropagation (for example, Q/K/V projections, attention scores, MLP intermediate outputs), so total activation memory is significantly larger than only this base tensor.
