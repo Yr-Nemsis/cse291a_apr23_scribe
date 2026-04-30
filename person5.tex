@@ -2,16 +2,50 @@
 % Slides covered: pages 22--26
 
 \section{Memory Overview}
-Taking GPT-3 (175B parameters) as an example, the memory cost of model parameters is about 350 GB (FP16) or 700 GB (FP32). 
-The activations, estimated only at transformer layer boundaries for 96 layers, consume about 7488 GB (FP16) or 14976 GB (FP32), though actual internal activations would be higher. 
-The optimizer states consume about 12 * 175 GB (FP32) of memory.
+To understand the necessity of memory optimization, we analyze the memory of a large-scale model like GPT-3, which contains 175 billion parameters. The memory cost primarily stems from three sources:
 
-\section{Reduce Activation Memory}
-In standard training, we store all intermediate activations to compute gradients during the backward pass, leading to an O(N) memory cost for an N-layer network. 
-Activation Checkpointing aims to reduce this peak memory by exploiting the fact that activations are not needed until the backward pass. 
-Option one is dicard nothing. 
-Option two is dicard all and recompute for each layer.
-We want to strike a balance. 
-The idea is that the activation is not needed again until the backward pass comes, discard some of them and recompute the missing intermediate nodes in small segments. 
-For an N-layer neural network, if we place a checkpoint every K layers, the total activation memory cost can be modeled as: Memory Cost = O(N/K) (Checkpoint cost) + O(K) (Re-computation cost). 
-By minimizing the cost function, we find the optimal solution at K= $\sqrt{N}$.
+\begin{itemize}
+    \item \textbf{Model Parameters:} For 175B parameters:
+    \begin{itemize}
+        \item \textbf{FP16} (2 bytes per param): $\approx 350$ GB.
+        \item \textbf{FP32} (4 bytes per param): $\approx 700$ GB.
+    \end{itemize}
+    
+    \item \textbf{Intermediate Activations:} 
+    \begin{itemize}
+        \item During training, activations must be stored for the backward pass, resulting in a lifetime of $O(N)$.
+        \item \textbf{Estimation:} At transformer layer boundaries (96 layers), activations occupy $\approx 7,488$ GB (FP16) or $14,976$ GB (FP32). 
+        \item \textit{Note:} Actual consumption is higher as internal operators within transformer layers also generate activations.
+    \end{itemize}
+    
+    \item \textbf{Optimizer States:}
+    \begin{itemize}
+        \item In \textbf{FP32} precision, the overhead is $12 \times 175$ GB.
+    \end{itemize}
+\end{itemize}
+
+\section{Activation Memory Optimization}
+
+\subsection{Motivation}
+In \textbf{Inference}, memory cost for activations is $O(1)$ as we can cycle through two buffers. However, in \textbf{Training}, the need to keep intermediate values for gradient steps leads to a linear $O(N)$ memory cost. Gradient Checkpointing is a technique to break this linear dependency by trading computation for memory.
+
+\subsection{Design Strategies}
+We can consider three approaches to managing activation memory:
+\begin{enumerate}
+    \item \textbf{Discard Nothing:} Store all activations. This results in the highest memory usage but minimal computation ($Memory+$, $Compute--$).
+    \item \textbf{Discard All:} Discard all activations after the forward pass and recompute everything during the backward pass. This is memory-efficient but computationally prohibitive ($Memory--$, $Compute++$).
+    \item \textbf{Checkpointing:} Store a subset of activations (checkpoints) and recompute the missing intermediate nodes in small segments during the backward pass
+\end{enumerate}
+
+\subsection{Mathematical Modeling}
+For an $N$-layer neural network, if we place a checkpoint every $K$ layers, the total activation memory cost is modeled as:
+\begin{equation}
+    \text{Memory Cost} = O\left(\frac{N}{K}\right) + O(K)
+\end{equation}
+Where:
+\begin{itemize}
+    \item $O(N/K)$ is the \textbf{Checkpoint cost}.
+    \item $O(K)$ is the \textbf{Re-computation cost}.
+\end{itemize}
+
+\textbf{Optimal Solution:} By minimizing the cost function, we find the optimal interval at $K = \sqrt{N}$. This reduces the activation memory footprint from $O(N)$ to $O(\sqrt{N})$.
