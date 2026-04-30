@@ -11,7 +11,7 @@
     \item[D.] It is possible to discard some of the activations from memory since they are only needed during the backward pass.
 \end{itemize}
 
-The answer is \textbf{B}. Gradient checkpointing is fundamentally a technique for activation memory only. It works by discarding intermediate activations after the forward pass and recomputing them on demand during the backward pass. Model weights, by contrast, must remain both the forward and the backward computation, as there is no possible way to recompute them during the backward pass, so the same trick cannot be applied to them. The other three statements each describe a correct property of the technique: it does reduce peak GPU memory (A); the choice of where to place the checkpoints directly determines the memory–recomputation trade-off (C); and the underlying reason it is safe to discard activations in the first place is precisely that they are only consumed once the backward pass reaches the corresponding operator (D).
+The answer is \textbf{B}. Gradient checkpointing is fundamentally a technique for activation memory only. It works by discarding intermediate activations after the forward pass and recomputing them on demand during the backward pass. Model weights, by contrast, must remain both the forward and the backward computation, as there is no possible way to recompute them during the backward pass, so the same trick cannot be applied to them.
 
 \subsection{Activation Size of GPT-3 2.7B}
 
@@ -65,4 +65,4 @@ We now have three memory-saving techniques for a single device: gradient accumul
     \item \textbf{Check whether the JCT is still acceptable.} All of these methods make training slower to some degree. If the final JCT is still within budget, then the setup is good. If not, the single device setup is no longer enough, and the next step is to use multiple devices, i.e., parallelism.
 \end{enumerate}
 
-The main idea is simple: always try the option with the smallest slowdown first, and only move to a heavier method if needed. Also note that these methods do not change tensor shapes. They mainly change when a tensor needs to stay on the GPU, not how large the tensor is. Reducing tensor size itself, for example, by using lower precision such as FP16, FP8, or FP4, is a separate topic(Quantization).
+The main idea is simple: always try the option with the smallest slowdown first, and only move to a heavier method if needed. Also note that these methods do not change tensor shapes. They mainly change when a tensor needs to stay on the GPU, not how large the tensor is. Reducing tensor size itself, for example, by using lower precision such as FP8, or FP4, is a separate topic(Quantization).
