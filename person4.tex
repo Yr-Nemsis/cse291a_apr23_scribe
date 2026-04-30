@@ -41,7 +41,7 @@ For each parameter, Adam keeps two additional tensors of the same shape as the p
 
 Both $m_t$ and $v_t$ are updated at every step and are required to compute the next parameter update. Because they share the parameter shape, their memory cost scales linearly with the number of parameters.
 
-\section{Total Adam State Cost}
+\subsection{Total Adam State Cost}
 
 Putting these pieces together, the per-step optimizer-related memory for Adam consists of three components, each of size $N \cdot \text{sizeof(element)}$, where $N$ is the total number of parameters:
 \begin{itemize}
