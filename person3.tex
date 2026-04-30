@@ -34,14 +34,3 @@ The output activation has $(bs \cdot m)\times p$ elements, so:
 \text{Activation memory} = bs \times m \times p \times \text{bytes per element}.
 \]
 The activation memory scales linearly with batch size because each input example contributes its own output activations.
-\section{Estimate the activation size:Transformers}
-In transformers, let $h$ be hidden size (embedding dimension) and $\text{seq\_len}$ be the number of tokens per sequence.
-For one layer, the input and output hidden states both have shape:
-\[
-(bs, \text{seq\_len}, h).
-\]
-So the base hidden-state activation memory is:
-\[
-bs \times \text{seq\_len} \times h \times \text{sizeof(element)}.
-\]
-During training, additional activations are stored for backpropagation (for example, Q/K/V projections, attention scores, MLP intermediate outputs), so total activation memory is significantly larger than only this base tensor.
