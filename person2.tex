@@ -1,0 +1,10 @@
+\section{Memory Consumption}
+Memory is one the most important concepts.  You cannot compute a workload if you are out of memory and you cannot compute it efficiently if you use the wrong kinds of memory.  The reason why the memory hierarchy exists is to speed up memory access and avoid memory bottlnecks. For a given workload to run, its peak memory must fit on available memory for the lifetime of the job. Available memory is defined as global memory such as High Bandwidth Memory (HBM) on GPU. Generally, there is no need to optimize peak memory as long as its less than available memory. 
+
+$$ \max(\mathrm{memory}) < \mathrm{available\ memory} $$
+
+There are three main sources of memory consumption in a model. (1) model weights, (2) activations (forward pass values), and (3) optimizer states (optimizers such as Adam etc.).
+
+
+\section{Methods to Analyze Memory}
+There are two main methods to analyze memory. (1) Size estimation i.e how many floating-point parameters are in the model. (2) For each floating-point parameter, how many bytes does it take up in memory.  For example, a model with 1 billion parameters and using 16-bit floating point precision would require roughly 2 GB of memory for the model weights alone.
