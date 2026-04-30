@@ -1,0 +1,57 @@
+\section{Estimate the Activation Size}
+\subsection{MLP}
+We start with a fully connected layer, which is the basic building block of an MLP. Such a layer is essentially a matrix multiplication of the form: \[C = X W.\]
+
+Suppose the input tensor $X$ has shape $\text{bs} \times m \times n$, where $\text{bs}$ is the batch size, $m$ is the number of input rows per example, and $n$ is the input feature dimension. The weight $W$ has shape $n \times p$. Then the output activation $C$ has shape $\text{bs} \times m \times p$, and its size in bytes is
+\[
+    \text{activation size}_{\text{matmul}}
+    \;=\; \text{bs} \cdot m \cdot p \cdot \text{sizeof(element)}.
+\]
+
+\subsection{Transformers}
+
+For a transformer layer, the activation tensor at the layer boundary typically has shape $\text{bs} \times h \times \text{seq\_len}$, where $h$ is the hidden dimension and $\text{seq\_len}$ is the sequence length. A transformer layer maps token representations to token representations, so its output has the same shape as its input. Treating the transformer layer as a black box, the per-layer activation size at the boundary is:
+\[
+    \text{activation size}_{\text{transformer}}
+    \;=\; \text{bs} \cdot h \cdot \text{seq\_len} \cdot \text{sizeof(element)}.
+\]
+
+\subsubsection{A Numerical Example: GPT-3 Per-Layer Activations}
+
+Considering one transformer layer of GPT-3, which has hidden dimension $d_{\text{model}} = 12288$, suppose the global token count for one iteration is $\text{bs} \cdot \text{seq\_len} \approx 3.2 \times 10^{6}$. The per-layer activation size is:
+\[
+    \text{bs} \cdot \text{seq\_len} \cdot d_{\text{model}}
+    \;=\; 3.2 \times 10^{6} \cdot 12288
+    \;\approx\; 3.93 \times 10^{10} \text{ elements}.
+\]
+
+Converting to bytes, using fp16 or bf16 ($2$ bytes per element), this is roughly $78$ GB per layer. Using fp32 ($4$ bytes per element), it doubles to roughly $156$ GB per layer.
+
+These numbers are large for a single transformer layer. Importantly, this is only the boundary activation: each operator inside the layer also produces activations of its own, so the realistic per-layer cost is higher than the formula above suggests.
+
+\section{Estimate the Optimizer State Size}
+\subsection{Adam}
+Adam is an adaptive optimizer that maintains running estimates of both the first and second moments of the gradient.
+
+For each parameter, Adam keeps two additional tensors of the same shape as the parameter:
+\begin{itemize}
+    \item $m_t$: the first moment estimate, which is an exponential moving average of the gradient.
+    \item $v_t$: the second moment estimate, which is an exponential moving average of the squared gradient.
+\end{itemize}
+
+Both $m_t$ and $v_t$ are updated at every step and are required to compute the next parameter update. Because they share the parameter shape, their memory cost scales linearly with the number of parameters.
+
+\subsection{Total Adam State Cost}
+
+Putting these pieces together, the per-step optimizer-related memory for Adam consists of three components, each of size $N \cdot \text{sizeof(element)}$, where $N$ is the total number of parameters:
+\begin{itemize}
+    \item $\nabla_{\theta} L$: the gradient with respect to parameters;
+    \item $m_t$ the first moment estimate;
+    \item $v_t$ the second moment estimate.
+\end{itemize}
+
+The total optimizer-related memory cost is therefore:
+\[
+    \text{optimizer memory}
+    \;=\; 3 N \cdot \text{sizeof(element)}.
+\]
