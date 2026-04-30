@@ -1,0 +1,67 @@
+% Scribe section by Ning Li
+% Slides covered: pages 32--36
+
+
+\section{Move to DRAM}
+
+Gradient checkpointing and gradient accumulation only help with activation memory. They do not reduce the memory used by weights or optimizer states. To handle those, we use a different idea.
+
+A typical training server actually has plenty of memory. It is just not on the GPU. For example, a machine with H100 or H200 GPUs usually has around one terabyte of CPU DRAM, while each GPU only has 40 to 80 GB of HBM. So if a tensor does not fit in HBM, we can try to put it in DRAM instead. The problem is that DRAM is much slower than HBM, and the GPU cannot read from it directly. The relevant numbers are summarized below. To solve such problem, we introduce the CPU SwapIn and SwapOut.
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+\textbf{Tier} & \textbf{Bandwidth} & \textbf{Capacity} \\
+\midrule
+GPU SRAM & 19 TB/s   & 20 MB \\
+GPU HBM  & 1.5 TB/s  & 40 GB \\
+CPU DRAM & 12.8 GB/s & $>$1 TB \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{CPU Swap}
+
+To use DRAM as extra memory, we introduce two new operations:
+\begin{itemize}
+    \item \texttt{SwapOut}: copy a tensor from HBM to CPU DRAM.
+    \item \texttt{SwapIn}: copy a tensor from CPU DRAM back to HBM.
+\end{itemize}
+This is called CPU swapping. Unlike checkpointing or accumulation, it applies to both weights and activations.
+
+The reason swapping works is that, at any given moment, the GPU is only computing on one operator. Tensors from operators that have already finished, or operators that have not started yet, do not need to stay in HBM. So during the forward pass, we can swap out tensors that have just been used. During the backward pass, we swap them back in before they are needed again. Swapping is a scheduling problem, so the runtime can run \texttt{SwapIn} on a separate stream and overlap it with the computation of an earlier layer. If the prefetch finishes in time, the swap is essentially free.
+
+\subsection{When Does Swapping Work?}
+
+Whether swapping is actually free depends on a simple comparison. The time to swap a tensor is
+\[
+T_{\text{swap}} \;=\; \frac{\text{tensor size}}{\text{bandwidth}}.
+\]
+For the prefetch to be hidden, we need $T_{\text{swap}} \le T_{\text{compute}}$, where $T_{\text{compute}}$ is the time the GPU spends on the layers in between.
+
+This condition is hard to satisfy on modern GPUs. Compute throughput on Blackwell-class hardware has grown much faster than memory bandwidth. So the GPU often finishes its current work before the next prefetch arrives, and then it has to wait. In practice, academic groups with limited GPU budgets still use swapping because they have no choice. Large industry labs usually avoid it because it makes training too slow.
+
+\section{Summary of Memory Optimizations}
+
+We have now seen three single-device techniques to fit a workload into limited GPU memory:
+\begin{itemize}
+    \item \textbf{Gradient checkpointing}: trade compute for memory. Only applies to activations.
+    \item \textbf{Gradient accumulation}: reduce the effective micro-batch size while keeping the same total batch size for each update.
+    \item \textbf{CPU swapping}: use a lower tier of the memory hierarchy. Applies to both weights and activations.
+\end{itemize}
+
+One thing to notice is that none of these techniques actually changes the size of any tensor. The shapes of weights, activations, and optimizer states all stay the same. What they change is the \emph{lifetime} of each tensor, that is, when it has to be on the GPU. So all three are scheduling techniques. They reshape the memory dynamics so that the peak HBM usage stays below the device capacity. The other direction is to reduce the original size itself, for example by using lower precision such as FP16, FP8, or FP4. This is the topic of the next lecture.
+
+\section{In-Class Questions}
+
+\subsection{Sources of Memory Consumption}
+
+\textbf{Q: Which of the following is \emph{not} one of the main sources of memory consumption?}
+\begin{itemize}
+    \item[A.] Intermediate activation values
+    \item[B.] Model weights
+    \item[C.] Optimizer states
+    \item[D.] Training code
+\end{itemize}
+
+The answer is \textbf{D}. The three main sources are weights, activations, and optimizer states. For example, the training code of GPT-3 is only a few kilobytes, so it is negligible.
