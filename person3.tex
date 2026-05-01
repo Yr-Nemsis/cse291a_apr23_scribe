@@ -20,17 +20,8 @@ If GPT-3 has $N$ parameters and we store weights in FP16/BF16, then:
 For FP32, it would be $N \times 4$ bytes.
 Note that batch size does not change the weight size; batch size mainly affects activation memory.
 \section{Estimate the activation size}
+\subsection{Conv2d}
 The parameter (or tensor) size is computed as the number of elements multiplied by the storage size of each element, which is usually 2 bytes (FP16) or 4 bytes (FP32), depending on the precision. Here, $bs$ means batch size, $nc$ means number of channels, and $w_o, h_o$ are the output width and height. Therefore, the activation size is
 \[
 bs \times nc \times w_o \times h_o \times \text{sizeof(element)}.
 \]
-\section{Estimate the activation size: MLP}
-For an MLP layer, the output is computed as:
-\[
-C = XW,
-\]
-The output activation has $(bs \cdot m)\times p$ elements, so:
-\[
-\text{Activation memory} = bs \times m \times p \times \text{bytes per element}.
-\]
-The activation memory scales linearly with batch size because each input example contributes its own output activations.
